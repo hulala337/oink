@@ -1,0 +1,173 @@
+diff -ruN --exclude=__MACOSX --exclude=__pycache__ /tmp/oink-orig/oink-main/.github/workflows/build-windows-msi.yml /tmp/oink-work/oink-main/.github/workflows/build-windows-msi.yml
+--- /tmp/oink-orig/oink-main/.github/workflows/build-windows-msi.yml	1970-01-01 08:00:00
++++ /tmp/oink-work/oink-main/.github/workflows/build-windows-msi.yml	2026-11-09 00:10:22
+@@ -0,0 +1,70 @@
++name: Build unsigned Windows x64 MSI (in-house)
++
++# Windows Server 2019 support build. The product's own packager refuses to run
++# outside an x64 Windows host, so this workflow uses a Windows runner instead of
++# signing/publishing anything: it only produces an unsigned per-machine MSI.
++on:
++  workflow_dispatch:
++    inputs:
++      build:
++        description: In-house build number (must be a positive integer)
++        required: true
++        default: '1'
++
++permissions:
++  contents: read
++
++jobs:
++  msi:
++    runs-on: windows-2022
++    timeout-minutes: 120
++    steps:
++      - name: Check out the full history
++        uses: actions/checkout@v4
++        with:
++          # In-house package notes and the source-commit provenance input need
++          # real history; a shallow clone makes package.py refuse the build.
++          fetch-depth: 0
++
++      - name: Install the pinned Node toolchain
++        uses: actions/setup-node@v4
++        with:
++          node-version: '24.14.1'
++
++      - name: Pin npm to the version the packager requires
++        run: npm install --global npm@11.11.0
++
++      - name: Install the pinned Rust toolchain
++        run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt --component clippy
++
++      - name: Report the toolchain the build will see
++        run: |
++          rustc --version
++          node --version
++          npm --version
++          python --version
++          dotnet --list-runtimes
++
++      - name: Build binaries and the MSI
++        env:
++          # WiX 5 ships as a net6.0 assembly; let it run on a newer runtime when
++          # the image no longer carries the .NET 6 runtime.
++          DOTNET_ROLL_FORWARD: LatestMajor
++          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
++        run: |
++          python build-support/package.py `
++            --platform windows `
++            --build ${{ inputs.build }} `
++            --output-root "$env:RUNNER_TEMP\oink-packages" `
++            --tool-cache "$env:RUNNER_TEMP\oink-tools"
++
++      - name: Show what was produced
++        run: Get-ChildItem -Recurse "$env:RUNNER_TEMP\oink-packages" -Include *.msi | Format-List FullName, Length
++
++      - name: Upload the MSI
++        uses: actions/upload-artifact@v4
++        with:
++          name: oink-windows-x64-msi
++          path: ${{ runner.temp }}/oink-packages/**/*.msi
++          if-no-files-found: error
++          retention-days: 14
+diff -ruN --exclude=__MACOSX --exclude=__pycache__ /tmp/oink-orig/oink-main/README.ja.md /tmp/oink-work/oink-main/README.ja.md
+--- /tmp/oink-orig/oink-main/README.ja.md	2026-11-06 03:52:28
++++ /tmp/oink-work/oink-main/README.ja.md	2026-11-09 00:02:05
+@@ -19,6 +19,7 @@
+ 
+ - **Mac**：Apple シリコン（arm64）のみ、macOS 14.2 以降
+ - **Windows**：x64、Windows 10 22H2（ビルド 19045）以降、または Windows 11
++- **Windows Server**：x64、Windows Server 2019（ビルド 17763）以降を「デスクトップ エクスペリエンス」でインストールしたもの。Server Core はシェルを持たないため非対応です。WebView2 Evergreen ランタイムを別途インストールし（Server には同梱されません）、音声共有を使う場合は Windows Audio サービスを開始してください。
+ 
+ SmartScreen に「Windows によって PC が保護されました」と表示された場合は、選択肢が表示されたときに限り **詳細情報 → 実行** を選んでください。UAC では発行元が不明と表示されることがあります。
+ 
+diff -ruN --exclude=__MACOSX --exclude=__pycache__ /tmp/oink-orig/oink-main/README.ko.md /tmp/oink-work/oink-main/README.ko.md
+--- /tmp/oink-orig/oink-main/README.ko.md	2026-11-06 03:52:28
++++ /tmp/oink-work/oink-main/README.ko.md	2026-11-09 00:02:11
+@@ -19,6 +19,7 @@
+ 
+ - **Mac**: Apple 실리콘(arm64)만 지원, macOS 14.2 이상
+ - **Windows**: x64, Windows 10 22H2(빌드 19045) 이상 또는 Windows 11
++- **Windows Server**: x64, Windows Server 2019(빌드 17763) 이상을 "데스크톱 환경"으로 설치한 경우. Server Core는 셸이 없어 지원하지 않습니다. WebView2 Evergreen 런타임을 먼저 설치하고(Server에는 기본 포함되지 않음), 오디오 공유를 쓰려면 Windows Audio 서비스를 시작하세요.
+ 
+ SmartScreen에 "Windows의 PC 보호" 메시지가 표시되면, 해당 옵션이 있을 때만 **추가 정보 → 실행**을 선택하세요. UAC에서 게시자를 알 수 없음으로 표시될 수 있습니다.
+ 
+diff -ruN --exclude=__MACOSX --exclude=__pycache__ /tmp/oink-orig/oink-main/README.md /tmp/oink-work/oink-main/README.md
+--- /tmp/oink-orig/oink-main/README.md	2026-11-06 03:52:28
++++ /tmp/oink-work/oink-main/README.md	2026-11-09 00:01:45
+@@ -19,6 +19,7 @@
+ 
+ - **Mac:** Apple silicon (arm64) only, macOS 14.2+
+ - **Windows:** x64, Windows 10 22H2 (build 19045)+ or Windows 11
++- **Windows Server:** x64, Server 2019 (build 17763)+ installed with Desktop Experience. Server Core has no shell, so it is not supported. Install the WebView2 Evergreen Runtime first (Server does not ship it), and start the Windows Audio service if you want audio sharing.
+ 
+ If SmartScreen says "Windows protected your PC", use **More info → Run anyway** only if offered. UAC may show an unknown publisher.
+ 
+diff -ruN --exclude=__MACOSX --exclude=__pycache__ /tmp/oink-orig/oink-main/README.zh-CN.md /tmp/oink-work/oink-main/README.zh-CN.md
+--- /tmp/oink-orig/oink-main/README.zh-CN.md	2026-11-06 03:52:28
++++ /tmp/oink-work/oink-main/README.zh-CN.md	2026-11-09 00:01:54
+@@ -19,6 +19,7 @@
+ 
+ - **Mac**：仅支持 Apple 芯片（arm64），macOS 14.2 及以上
+ - **Windows**：x64，Windows 10 22H2（build 19045）及以上，或 Windows 11
++- **Windows Server**：x64，Windows Server 2019（build 17763）及以上，必须以「桌面体验」方式安装；Server Core 没有图形外壳，不支持。装之前请先单独安装 WebView2 Evergreen 运行时（服务器版不自带），需要用音频共享时还要启动 Windows Audio 服务。
+ 
+ 如果 SmartScreen 提示“Windows 已保护你的电脑”，仅在出现相应选项时点击 **更多信息 → 仍要运行**。UAC 可能显示发布者未知。
+ 
+diff -ruN --exclude=__MACOSX --exclude=__pycache__ /tmp/oink-orig/oink-main/packaging/identity.json /tmp/oink-work/oink-main/packaging/identity.json
+--- /tmp/oink-orig/oink-main/packaging/identity.json	2026-11-06 03:52:28
++++ /tmp/oink-work/oink-main/packaging/identity.json	2026-11-09 00:01:05
+@@ -6,7 +6,8 @@
+   "repository_org": "oinkvm",
+   "macos_minimum": "14.2",
+   "windows_minimum": "10.0",
+-  "minimumWindowsBuild": 19045,
++  "minimumWindowsBuild": 17763,
++  "minimumClientWindowsBuild": 19045,
+   "data_directory": "Oink",
+   "unix_data_directory": "oink",
+   "macos_logs_directory": "Oink",
+diff -ruN --exclude=__MACOSX --exclude=__pycache__ /tmp/oink-orig/oink-main/packaging/windows/Package.wxs /tmp/oink-work/oink-main/packaging/windows/Package.wxs
+--- /tmp/oink-orig/oink-main/packaging/windows/Package.wxs	2026-11-06 03:52:28
++++ /tmp/oink-work/oink-main/packaging/windows/Package.wxs	2026-11-09 00:01:33
+@@ -50,7 +50,17 @@
+       <RegistrySearch Id="WindowsBuild" Root="HKLM" Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+                       Name="CurrentBuildNumber" Type="raw" Bitness="always64" />
+     </Property>
+-    <Launch Condition="Installed OR (VersionNT64 AND WINDOWSBUILD &gt;= $(var.MinimumWindowsBuild))" Message="Windows 10 22H2 (build $(var.MinimumWindowsBuild)) or Windows 11 x64 is required." />
++    <!-- Windows Server 2019 shares build 17763 with Windows 10 1809, so a single
++         numeric floor cannot express the support matrix. InstallationType is
++         "Client" on client Windows and "Server" on a server SKU installed with
++         Desktop Experience; "Server Core" is headless and stays unsupported.
++         The client floor comes from the tested release, the server floor from
++         the oldest server build the Win32 API surface here exists on. -->
++    <Property Id="SERVERINSTALLATION">
++      <RegistrySearch Id="InstallationType" Root="HKLM" Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion"
++                      Name="InstallationType" Type="raw" Bitness="always64" />
++    </Property>
++    <Launch Condition="Installed OR (VersionNT64 AND (WINDOWSBUILD &gt;= $(var.MinimumClientWindowsBuild) OR (WINDOWSBUILD &gt;= $(var.MinimumWindowsBuild) AND SERVERINSTALLATION = &quot;Server&quot;)))" Message="Windows 10 22H2 (build $(var.MinimumClientWindowsBuild)) or later, Windows 11, or Windows Server 2019/2022/2025 with Desktop Experience is required (x64)." />
+     <!-- A per-machine product needs the machine-wide Evergreen Runtime so every
+          user session can open the UI. Do not silently download during install. -->
+     <Property Id="WEBVIEW2RUNTIME">
+@@ -59,7 +69,7 @@
+                       Name="pv" Type="raw" />
+     </Property>
+     <Launch Condition="Installed OR (WEBVIEW2RUNTIME AND WEBVIEW2RUNTIME &lt;&gt; &quot;0.0.0.0&quot;)"
+-            Message="Install the Microsoft Edge WebView2 Evergreen Runtime for all users, then run Oink Setup again: https://developer.microsoft.com/microsoft-edge/webview2/" />
++            Message="Install the Microsoft Edge WebView2 Evergreen Runtime for all users, then run Oink Setup again: https://developer.microsoft.com/microsoft-edge/webview2/ (Windows Server does not ship it; the Evergreen Runtime also supports Server 2019 and later.)" />
+     <Property Id="ARPNOMODIFY" Value="1" />
+     <Property Id="ARPCOMMENTS" Value="Uninstalling removes Oink and its local user data." />
+     <!-- Start maps a real shortcut target to its removable ARP product. Set the
+diff -ruN --exclude=__MACOSX --exclude=__pycache__ /tmp/oink-orig/oink-main/packaging/windows/build.py /tmp/oink-work/oink-main/packaging/windows/build.py
+--- /tmp/oink-orig/oink-main/packaging/windows/build.py	2026-11-06 03:52:28
++++ /tmp/oink-work/oink-main/packaging/windows/build.py	2026-11-09 00:01:15
+@@ -202,6 +202,7 @@
+               'BannerBmp': str(ROOT / 'packaging/windows/installer-banner.bmp'), 'ProductName': I['name'], 'Manufacturer': I['publisher'], 'ProductVersion': msi_version,
+               'SourceTreeSha256': a.source_tree_sha256, 'ProductCode': product_code, 'UpgradeCode': w['upgrade_code'],
+               'MinimumWindowsBuild': str(I['minimumWindowsBuild']),
++              'MinimumClientWindowsBuild': str(I['minimumClientWindowsBuild']),
+               'InstallDirectory': w['install_directory'], 'ServiceName': w['service_name'],
+               'ServiceDisplayName': w['service_display_name'], 'RegistryKey': w['registry_key'], 'RunValue': w['run_value'],
+               'MaintenanceDirectory': w['maintenance_directory'], 'UiExe': b['ui'] + '.exe',
